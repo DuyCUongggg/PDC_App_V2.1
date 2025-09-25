@@ -460,22 +460,24 @@ class UpgradeManager {
             });
         }
 
-        // OPTION 2: Bù đủ full package
+        // OPTION 2: Bù đủ full package (chỉ khi cần bù > 0)
         const topupAmount = Math.max(0, (Number(newPackagePrice) || 0) - safeRefund);
-        const fullEndDate = new Date(upgradeDate);
-        fullEndDate.setDate(fullEndDate.getDate() + newTotalDays);
-        scenarios.push({
-            type: 'full_topup',
-            topupAmount: topupAmount,
-            totalDays: newTotalDays,
-            moneyRefunded: 0,
-            startDate: new Date(upgradeDate),
-            endDate: fullEndDate,
-            description: `Bù thêm ${formatPrice(topupAmount)}đ - ${newTotalDays} ngày (${this.selectedNewProduct.duration} ${this.selectedNewProduct.durationUnit})`
-        });
+        if (topupAmount > 0) {
+            const fullEndDate = new Date(upgradeDate);
+            fullEndDate.setDate(fullEndDate.getDate() + newTotalDays);
+            scenarios.push({
+                type: 'full_topup',
+                topupAmount: topupAmount,
+                totalDays: newTotalDays,
+                moneyRefunded: 0,
+                startDate: new Date(upgradeDate),
+                endDate: fullEndDate,
+                description: `Bù thêm ${formatPrice(topupAmount)}đ - ${newTotalDays} ngày (${this.selectedNewProduct.duration} ${this.selectedNewProduct.durationUnit})`
+            });
+        }
 
         return {
-            availableScenarios: scenarios.length > 1 ? ['proportional', 'full_topup'] : [scenarios[0].type],
+            availableScenarios: scenarios.map(s => s.type),
             scenarios
         };
     }
@@ -552,10 +554,6 @@ class UpgradeManager {
             <div class="result-header">
                 <h4>Kết quả đổi gói</h4>
                 <div class="result-actions">
-                    <button class="btn btn-outline btn-sm" onclick="upgradeManager.printResults()">
-                        <span class="btn-icon">🖨️</span>
-                        In
-                    </button>
                     <button class="btn btn-outline btn-sm" onclick="upgradeManager.refreshData()">
                         <span class="btn-icon">🔄</span>
                         Làm mới
@@ -605,6 +603,7 @@ class UpgradeManager {
         // Scenarios (mirror customer-facing content)
         const proportionalDays = Math.floor(details.refundAmount / newPricePerDay);
         const topupFull = Math.max(0, newProduct.price - details.refundAmount);
+        const showFullTopup = topupFull > 0;
 
         // Calculate resulting end dates from upgrade start
         const upgradeStartForCalc = new Date(details.endDate);
@@ -682,6 +681,7 @@ class UpgradeManager {
                             <div class="info-card-header">Nhận được (không bù)</div>
                             <div class="info-card-value">${proportionalDays} ngày — đến ${formatDMY(proportionalEndDate)}</div>
                         </div>
+                        ${showFullTopup ? `
                         <div class="info-card calculation-card">
                             <div class="info-card-value">
                                 <div class="calc-formula">${formatPrice(newProduct.price)}đ - ${formatPrice(details.refundAmount)}đ</div>
@@ -692,6 +692,7 @@ class UpgradeManager {
                             <div class="info-card-header">Cần bù (full gói)</div>
                             <div class="info-card-value">${formatPrice(topupFull)}đ — đến ${formatDMY(fullEndDate)}</div>
                         </div>
+                        ` : ''}
                     </div>
                 </div>
 
@@ -702,13 +703,15 @@ class UpgradeManager {
                         <span class="calc-label">Số ngày (không bù):</span>
                         <span class="calc-value">${formatPrice(details.refundAmount)}đ ÷ ${formatPrice(newPricePerDay)}đ/ngày = ${proportionalDays} ngày → đến: ${formatDMY(proportionalEndDate)}</span>
                     </div>
+                    ${showFullTopup ? `
                     <div class="calc-row">
                         <span class="calc-label">Số ngày (full gói):</span>
                         <span class="calc-value">${newProduct.duration} ${newProduct.durationUnit} = ${details.newTotalDays} ngày → đến: ${formatDMY(fullEndDate)}</span>
                     </div>
+                    ` : ''}
                     <div class="calc-row calc-total">
                         <span class="calc-label">Kết quả:</span>
-                        <span class="calc-value">${topupFull > 0 ? 'Cần bù thêm ' + formatPrice(topupFull) + 'đ (full gói)' : 'Không cần bù; nhận ' + proportionalDays + ' ngày (đổi theo tỷ lệ)'}</span>
+                        <span class="calc-value">${showFullTopup ? 'Cần bù thêm ' + formatPrice(topupFull) + 'đ (full gói)' : 'Không cần bù; nhận ' + proportionalDays + ' ngày (đổi theo tỷ lệ)'}</span>
                     </div>
                 </div>
             </div>
@@ -720,20 +723,20 @@ class UpgradeManager {
         const messages = [];
 
         scenarios.forEach((scenario, index) => {
-            const isNoTopup = scenario.topupAmount === 0;
-            const title = isNoTopup ? 'Đổi theo tỷ lệ (không bù)' : 'Bù thêm tiền (full gói)';
+            const isNoTopup = scenario.type === 'proportional';
+            const title = isNoTopup ? 'Không bù thêm tiền' : 'Bù thêm tiền';
             
-            let content = `Kính gửi Quý khách,\n\nCentrix xin thông tin về việc đổi gói dịch vụ như sau:\n\n📦 THÔNG TIN GÓI HIỆN TẠI:\n• Tên gói: ${this.selectedCurrentProduct.name} (${this.selectedCurrentProduct.duration} ${this.selectedCurrentProduct.durationUnit})\n• Thời gian đã sử dụng: ${formatDMY(details.startDate)} → ${formatDMY(details.endDate)} (${details.daysUsed} ngày)\n• Thời gian còn lại: ${details.remainingDays} ngày\n• Giá trị còn lại (ước tính): ${formatPrice(details.refundAmount)}đ\n\n🆕 THÔNG TIN GÓI MỚI:\n• Tên gói: ${this.selectedNewProduct.name} (${this.selectedNewProduct.duration} ${this.selectedNewProduct.durationUnit})\n• Giá gói: ${formatPrice(this.selectedNewProduct.price)}đ\n\n${isNoTopup ? '🎁' : '💰'} ${title}:`;
+            let content = `Kính gửi Quý khách,\n\nCentrix xin thông tin về việc đổi gói dịch vụ như sau:\n\n📦 GÓI HIỆN TẠI:\n• Tên gói: ${this.selectedCurrentProduct.name} (${this.selectedCurrentProduct.duration} ${this.selectedCurrentProduct.durationUnit})\n• Đã dùng: ${formatDMY(details.startDate)} → ${formatDMY(details.endDate)} (${details.daysUsed} ngày)\n• Còn lại: ${details.remainingDays} ngày (≈ ${formatPrice(details.refundAmount)}đ)\n\n🆕 GÓI MỚI:\n• Tên gói: ${this.selectedNewProduct.name} (${this.selectedNewProduct.duration} ${this.selectedNewProduct.durationUnit})\n• Giá gói: ${formatPrice(this.selectedNewProduct.price)}đ`;
 
             if (isNoTopup) {
-                content += `\n• Không cần thanh toán thêm.\n• Thời gian áp dụng: ${formatDMY(scenario.startDate)} → ${formatDMY(scenario.endDate)} (${scenario.totalDays} ngày)`;
+                content += `\n\n• Không cần thanh toán thêm\n• Thời gian sử dụng gói mới: ${formatDMY(scenario.startDate)} → ${formatDMY(scenario.endDate)} (${scenario.totalDays} ngày)`;
                 
                 // Nếu có tiền thừa
                 if (scenario.moneyRefunded > 0) {
                     content += `\n• Tiền thừa hoàn lại: ${formatPrice(scenario.moneyRefunded)}đ`;
                 }
             } else {
-                content += `\n• Cần thanh toán thêm: ${formatPrice(scenario.topupAmount)}đ.\n• Thời gian sử dụng: ${formatDMY(scenario.startDate)} → ${formatDMY(scenario.endDate)} (${scenario.totalDays} ngày)`;
+                content += `\n\n• Số tiền cần thanh toán thêm: ${formatPrice(scenario.topupAmount)}đ\n• Thời gian sử dụng gói mới: ${formatDMY(scenario.startDate)} → ${formatDMY(scenario.endDate)} (${scenario.totalDays} ngày)`;
             }
             
             content += `\n\nCentrix sẵn sàng hỗ trợ nếu Quý khách cần thêm thông tin.\nTrân trọng.`;
@@ -795,17 +798,7 @@ class UpgradeManager {
         }
     }
 
-    printResults() {
-        const content = document.getElementById('upgradeResult');
-        if (!content) return;
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(`
-            <html><head><title>Kết quả đổi gói sản phẩm</title>
-            <style>body{font-family: Arial, sans-serif; margin:20px}.breakdown-grid{display:block}.breakdown-section{margin-bottom:20px;padding:15px;border:1px solid #ddd}h6{color:#333;margin-bottom:10px}.calc-row{display:flex;justify-content:space-between;margin:5px 0}.usage-progress{display:none}</style>
-            </head><body>${content.innerHTML}</body></html>`);
-        printWindow.document.close();
-        printWindow.print();
-    }
+    // printResults removed per request
 
     refreshData() {
         try {
