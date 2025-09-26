@@ -1062,6 +1062,8 @@
 
     <div class="mobile-overlay" id="mobileOverlay"></div>
 
+    
+
 
     <!-- Edit Modal -->
     <div id="editModal" class="modal">
@@ -1164,6 +1166,7 @@
             </div>
             
             <div class="modal-footer">
+                <button class="btn btn-danger" onclick="deleteAllPeople()">Xóa tất cả người</button>
                 <button class="btn btn-outline" onclick="closeManagePeopleModal()">Đóng</button>
                 <button class="btn btn-primary" onclick="savePeopleChanges()">
                     <span class="btn-icon">💾</span>
@@ -1332,8 +1335,7 @@
     </div>
 
 
-    <!-- Hidden file input -->
-    <input type="file" id="importFile" style="display:none" onchange="handleImport()" />
+    
 
     <!-- Scripts -->
     <script src="js/config.js"></script>

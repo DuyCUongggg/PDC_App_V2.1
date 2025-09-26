@@ -132,6 +132,264 @@ function switchPersonalViewMode(mode) {
 window.switchPersonalViewMode = switchPersonalViewMode;
 window.switchScheduleView = switchScheduleView;
 
+// ===== CSV IMPORT =====
+// Import features removed per request
+
+
+function parseCsv(text) {
+    // Auto-detect delimiter: comma, semicolon, or tab
+    const sample = String(text).split(/\r?\n/).slice(0, 5).join('\n');
+    const candidates = [',', ';', '\t'];
+    let bestDelim = ',';
+    let bestScore = -1;
+    for (const d of candidates) {
+        const counts = sample.split(/\r?\n/).map(l => l.split(d).length).filter(n => n > 1);
+        const score = counts.length > 0 ? counts.reduce((a, b) => a + b, 0) / counts.length : 0;
+        if (score > bestScore) { bestScore = score; bestDelim = d; }
+    }
+    const lines = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim().length > 0);
+    const rows = [];
+    for (const line of lines) {
+        const row = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+                if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+                else { inQuotes = !inQuotes; }
+            } else if (ch === bestDelim && !inQuotes) {
+                row.push(cur.trim());
+                cur = '';
+            } else {
+                cur += ch;
+            }
+        }
+        row.push(cur.trim());
+        rows.push(row);
+    }
+    if (!rows || rows.length === 0) throw new Error('File rỗng');
+    if (rows[0].length < 3) throw new Error('CSV thiếu cột (cần tối thiểu name, day, shift)');
+    return rows;
+}
+
+function isCentrixMatrixFormat(text) {
+    const lines = text.split(/\r?\n/).slice(0, 5);
+    // Heuristics: contains Vietnamese title, or first column is employee label, or a row with many day numbers
+    const hasTitle = lines.some(l => l.toLowerCase().includes('lịch') || l.toLowerCase().includes('lich'));
+    const hasEmployeeHeader = lines.some(l => l.toLowerCase().includes('tên nhân viên') || l.toLowerCase().includes('ten nhan vien'));
+    const hasManyDaysRow = lines.some(l => {
+        const cells = l.split(/[;,\t]/).map(c => c.trim());
+        const nums = cells.filter(c => /^\d{1,2}$/.test(c));
+        return nums.length >= 7; // a row listing many day numbers
+    });
+    return hasTitle || hasEmployeeHeader || hasManyDaysRow;
+}
+
+// Parse Centrix matrix schedule exported as semicolon-separated rows where
+// row 5 has day headers 1..31 and subsequent rows are employee names with shift tokens
+function importCentrixMatrixSchedule(text, fileName) {
+    // Auto-detect delimiter for matrix: ; , or tab
+    const sample = text.split(/\r?\n/).slice(0, 5).join('\n');
+    const delims = [';', ',', '\t'];
+    let delim = ';';
+    let best = -1;
+    for (const d of delims) {
+        const counts = sample.split(/\r?\n/).map(l => l.split(d).length).filter(n => n > 1);
+        const score = counts.length ? counts.reduce((a,b)=>a+b,0)/counts.length : 0;
+        if (score > best) { best = score; delim = d; }
+    }
+    const rows = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').map(r => r.split(new RegExp(delim)));
+    // Find header row containing days (1..31). It may be row 2 if row 1 has weekday labels.
+    let headerRowIndex = -1;
+    for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = rows[i];
+        const nums = row.map(c => c.trim()).filter(c => /^\d{1,2}$/.test(c));
+        if (nums.length >= 7) { // enough numbers to be a day row
+            headerRowIndex = i;
+            break;
+        }
+    }
+    if (headerRowIndex === -1) throw new Error('Không tìm thấy hàng tiêu đề ngày 1..31 trong file.');
+    const header = rows[headerRowIndex];
+    // Try to detect month/year (Vietnamese like "Tháng Mười" and year 2025 preceding)
+    let year = new Date().getFullYear();
+    let month = new Date().getMonth() + 1;
+    for (let i = 0; i < Math.min(headerRowIndex, 5); i++) {
+        const line = rows[i].join(' ');
+        const yearMatch = line.match(/(20\d{2})/);
+        if (yearMatch) year = parseInt(yearMatch[1], 10);
+        const monthMap = {
+            'một': 1, 'hai': 2, 'ba': 3, 'tư': 4, 'bốn': 4, 'năm': 5, 'sáu': 6,
+            'bảy': 7, 'tám': 8, 'chín': 9, 'mười': 10, 'mười': 10, 'mười một': 11, 'mười hai': 12,
+            'muoi': 10, 'muoi mot': 11, 'muoi hai': 12
+        };
+        const lower = line.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+        if (lower.includes('thang')) {
+            if (lower.includes('muoi hai')) month = 12;
+            else if (lower.includes('muoi mot')) month = 11;
+            else if (lower.includes('muoi')) month = 10;
+        }
+    }
+    // Build mapping from column index -> day number
+    const dayCols = [];
+    for (let c = 0; c < header.length; c++) {
+        const cell = header[c].trim();
+        if (/^\d{1,2}$/.test(cell)) {
+            dayCols.push({ col: c, day: parseInt(cell, 10) });
+        }
+    }
+    // Data rows start after headerRowIndex; first cell = employee name
+    let peopleAdded = 0;
+    let shiftsAdded = 0;
+    const ensurePersonByName = (name) => {
+        let person = scheduleData.people.find(p => p.name.toLowerCase() === name.toLowerCase());
+        if (!person) {
+            const id = 'person_' + Math.random().toString(36).slice(2, 8);
+            person = { id, name, color: randomColor() };
+            scheduleData.people.push(person);
+            peopleAdded++;
+        }
+        return person;
+    };
+    for (let r = headerRowIndex + 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length === 0) continue;
+        const name = (row[0] || '').trim();
+        if (!name || name.toLowerCase().includes('tổng')) continue;
+        const person = ensurePersonByName(name);
+        for (const { col, day } of dayCols) {
+            const token = (row[col] || '').trim();
+            if (!token) continue;
+            const shiftType = normalizeShift(token);
+            if (!shiftType) continue;
+            // Compute weekday for this calendar date
+            const dateObj = new Date(year, month - 1, day);
+            const weekdayIndex = dateObj.getDay(); // 0=Sun..6=Sat
+            const dayKey = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][weekdayIndex];
+            const conflicts = checkShiftConflicts(person.id, dayKey, shiftType);
+            if (conflicts.length > 0) continue;
+            scheduleData.shifts.push({
+                id: generateShiftId(),
+                personId: person.id,
+                day: dayKey,
+                shiftType,
+                note: null,
+                mealAllowance: 'company',
+                createdAt: new Date(year, month - 1, day).toISOString()
+            });
+            shiftsAdded++;
+        }
+    }
+    updatePeopleSelects();
+    return { peopleAdded, shiftsAdded };
+}
+// Expected headers (case-insensitive): name, day, shift, note, color
+// day accepts: monday..sunday or Thứ 2..Chủ nhật; shift accepts keys in shiftConfigs
+function ingestScheduleCsv(rows) {
+    if (!rows || rows.length === 0) throw new Error('CSV rỗng');
+    const header = rows[0].map(h => h.toLowerCase());
+    const idx = {
+        name: header.indexOf('name') !== -1 ? header.indexOf('name') : header.indexOf('tên'),
+        day: header.indexOf('day') !== -1 ? header.indexOf('day') : header.indexOf('ngày'),
+        shift: header.indexOf('shift') !== -1 ? header.indexOf('shift') : header.indexOf('ca'),
+        note: header.indexOf('note') !== -1 ? header.indexOf('note') : header.indexOf('ghi chú'),
+        color: header.indexOf('color') !== -1 ? header.indexOf('color') : header.indexOf('màu')
+    };
+    if (idx.name === -1 || idx.day === -1 || idx.shift === -1) {
+        throw new Error('Thiếu cột bắt buộc: name, day, shift');
+    }
+    let peopleAdded = 0;
+    let shiftsAdded = 0;
+    const ensurePerson = (name, color) => {
+        let person = scheduleData.people.find(p => p.name.toLowerCase() === name.toLowerCase());
+        if (!person) {
+            const id = 'person_' + Math.random().toString(36).slice(2, 8);
+            person = { id, name, color: color || randomColor() };
+            scheduleData.people.push(person);
+            peopleAdded++;
+        } else if (color && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) {
+            person.color = color;
+        }
+        return person;
+    };
+    for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length === 0) continue;
+        const name = (row[idx.name] || '').trim();
+        const dayRaw = (row[idx.day] || '').trim();
+        const shiftRaw = (row[idx.shift] || '').trim();
+        const note = idx.note !== -1 ? (row[idx.note] || '').trim() : '';
+        const color = idx.color !== -1 ? (row[idx.color] || '').trim() : '';
+        if (!name || !dayRaw || !shiftRaw) continue;
+        const person = ensurePerson(name, color);
+        const day = normalizeDay(dayRaw);
+        const shiftType = normalizeShift(shiftRaw);
+        if (!day || !shiftConfigs[shiftType]) {
+            console.error('Bỏ qua dòng CSV do không hợp lệ:', row);
+            continue;
+        }
+        // Check conflicts
+        const conflicts = checkShiftConflicts(person.id, day, shiftType);
+        if (conflicts.length > 0) {
+            console.warn('Bỏ qua ca trùng lặp cho', name, day, shiftType);
+            continue;
+        }
+        scheduleData.shifts.push({
+            id: generateShiftId(),
+            personId: person.id,
+            day,
+            shiftType,
+            note: note || null,
+            mealAllowance: 'company',
+            createdAt: new Date().toISOString()
+        });
+        shiftsAdded++;
+    }
+    updatePeopleSelects();
+    return { peopleAdded, shiftsAdded };
+}
+
+function normalizeDay(v) {
+    const s = v.toLowerCase();
+    const map = {
+        'thứ 2': 'monday', 'thu 2': 'monday', 't2': 'monday', 'monday': 'monday', 'mon': 'monday',
+        'thứ 3': 'tuesday', 'thu 3': 'tuesday', 't3': 'tuesday', 'tuesday': 'tuesday', 'tue': 'tuesday',
+        'thứ 4': 'wednesday', 'thu 4': 'wednesday', 't4': 'wednesday', 'wednesday': 'wednesday', 'wed': 'wednesday',
+        'thứ 5': 'thursday', 'thu 5': 'thursday', 't5': 'thursday', 'thursday': 'thursday', 'thu': 'thursday',
+        'thứ 6': 'friday', 'thu 6': 'friday', 't6': 'friday', 'friday': 'friday', 'fri': 'friday',
+        'thứ 7': 'saturday', 'thu 7': 'saturday', 't7': 'saturday', 'saturday': 'saturday', 'sat': 'saturday',
+        'chủ nhật': 'sunday', 'chu nhat': 'sunday', 'cn': 'sunday', 'sunday': 'sunday', 'sun': 'sunday'
+    };
+    return map[s] || null;
+}
+
+function normalizeShift(v) {
+    const s = String(v).toLowerCase().replace(/\s+/g, ' ').trim();
+    if (shiftConfigs[s]) return s;
+    // Extract all known patterns; prefer combined shifts over single ones
+    const re = /(1\+\s*2|2\+\s*3|1\+\s*3|ca\s*1\+\s*2|ca\s*2\+\s*3|ca\s*1\+\s*3|8-17|13-22|8-12,\s*18-22|8-22|ca\s*1|ca\s*2|ca\s*3|\b1\b|\b2\b|\b3\b|8-12|13-17|18-22)/g;
+    const matches = s.match(re) || [];
+    // Choose the longest match (so 1+2 wins over 1)
+    let sel = '';
+    for (const m of matches) { if (m.replace(/\s+/g, '').length > sel.length) sel = m; }
+    const key = sel ? sel.replace(/\s+/g, '').replace('ca', '') : '';
+    const map = {
+        '1': 'shift1', '2': 'shift2', '3': 'shift3',
+        'ca1': 'shift1', 'ca2': 'shift2', 'ca3': 'shift3',
+        '1+2': 'shift1-2', '2+3': 'shift2-3', '1+3': 'shift1-3',
+        '8-12': 'shift1', '13-17': 'shift2', '18-22': 'shift3',
+        '8-17': 'shift1-2', '13-22': 'shift2-3', '8-12,18-22': 'shift1-3',
+        '8-22': 'all'
+    };
+    return map[key] || null;
+}
+
+function randomColor() {
+    const colors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#22c55e','#eab308'];
+    return colors[Math.floor(Math.random() * colors.length)];
+}
+
 function changeWeek(direction) {
     currentWeek += direction;
     updateWeekDisplay();
@@ -203,9 +461,10 @@ function renderTeamSchedule() {
                 const person = scheduleData.people.find(p => p.id === shift.personId);
                 const personColor = person ? person.color : '#3b82f6';
                 
+                const displayName = getDisplayShiftLabel(shift.shiftType, slot.time);
                 dayCell.innerHTML = `
                     <div class="shift-info">${getPersonName(shift.personId)}</div>
-                    <div class="shift-time">${shiftConfigs[shift.shiftType].name}</div>
+                    <div class="shift-time">${displayName}</div>
                     ${shift.note ? `<div class="shift-note">${shift.note}</div>` : ''}
                 `;
                 dayCell.style.borderLeftColor = personColor;
@@ -267,9 +526,10 @@ function renderPersonalSchedule() {
                 const person = scheduleData.people.find(p => p.id === shift.personId);
                 const personColor = person ? person.color : '#3b82f6';
                 
+                const displayName = getDisplayShiftLabel(shift.shiftType, slot.time);
                 dayCell.innerHTML = `
-                    <div class="shift-info">${shiftConfigs[shift.shiftType].name}</div>
-                    <div class="shift-time">${shiftConfigs[shift.shiftType].start} - ${shiftConfigs[shift.shiftType].end}</div>
+                    <div class="shift-info">${displayName}</div>
+                    <div class="shift-time">${shiftConfigs[shift.shiftType].start}${shiftConfigs[shift.shiftType].end ? ' - ' + shiftConfigs[shift.shiftType].end : ''}</div>
                     ${shift.note ? `<div class="shift-note">${shift.note}</div>` : ''}
                 `;
                 dayCell.style.borderLeftColor = personColor;
@@ -323,16 +583,54 @@ function getShiftsForDayAndTime(day, time) {
 }
 
 function isTimeInShift(time, shiftConfig) {
+    // Support combined shifts by start/end
     if (shiftConfig.start === '08:00-12:00, 18:00-22:00') {
         return time === '08:00' || time === '18:00';
     }
-    
+    if (shiftConfig.end) {
+        // Treat combined ranges as occupying multiple rows
+        const startHour = parseInt(shiftConfig.start.split(':')[0]);
+        const endHour = parseInt(shiftConfig.end.split(':')[0]);
+        const timeHour = parseInt(time.split(':')[0]);
+        // Show at the starting hours of each component block
+        if (startHour === 8 && endHour >= 17) {
+            // Ca 1+2 or All covers 08:00; also show 13:00 if spans past 13
+            if (timeHour === 8) return true;
+            if (endHour >= 17 && timeHour === 13) return true;
+            if (endHour >= 22 && timeHour === 18) return true; // All day
+            return false;
+        }
+        if (startHour === 13 && endHour >= 22) {
+            // Ca 2+3: show at 13:00 and 18:00
+            return timeHour === 13 || timeHour === 18;
+        }
+        // Default: single block starting at start
+        return time === shiftConfig.start;
+    }
     return time === shiftConfig.start;
 }
 
 function getPersonName(personId) {
     const person = scheduleData.people.find(p => p.id === personId);
     return person ? person.name : personId;
+}
+
+function getDisplayShiftLabel(shiftType, time) {
+    switch (shiftType) {
+        case 'shift1-2':
+            return time === '13:00' ? 'Ca 2' : 'Ca 1';
+        case 'shift2-3':
+            return time === '18:00' ? 'Ca 3' : 'Ca 2';
+        case 'shift1-3':
+            return time === '18:00' ? 'Ca 3' : 'Ca 1';
+        case 'all':
+            if (time === '08:00') return 'Ca 1';
+            if (time === '13:00') return 'Ca 2';
+            if (time === '18:00') return 'Ca 3';
+            return shiftConfigs[shiftType].name;
+        default:
+            return shiftConfigs[shiftType].name;
+    }
 }
 
 function openAddShiftModal(day = null, time = null, person = null) {
@@ -846,6 +1144,7 @@ function renderPeopleManagement() {
                    onchange="updatePersonColor('${person.id}', this.value)">
             <input type="text" class="person-name-input" value="${person.name}" 
                    onchange="updatePersonName('${person.id}', this.value)">
+            <button class="btn btn-danger btn-sm" onclick="deletePerson('${person.id}')" title="Xóa người">🗑️</button>
         `;
         peopleList.appendChild(personItem);
     });
@@ -895,6 +1194,47 @@ function savePeopleChanges() {
     showNotification('Đã lưu thay đổi thông tin người!');
 }
 window.savePeopleChanges = savePeopleChanges;
+
+function deletePerson(personId) {
+    const person = scheduleData.people.find(p => p.id === personId);
+    if (!person) return;
+    const confirmDelete = confirm(`Xóa người "${person.name}"? Các ca liên quan cũng sẽ bị xóa.`);
+    if (!confirmDelete) return;
+    // Remove person
+    scheduleData.people = scheduleData.people.filter(p => p.id !== personId);
+    // Remove shifts of that person
+    const before = scheduleData.shifts.length;
+    scheduleData.shifts = scheduleData.shifts.filter(s => s.personId !== personId);
+    const removedShifts = before - scheduleData.shifts.length;
+    saveScheduleData();
+    // Refresh UI
+    updatePeopleSelects();
+    renderTeamSchedule();
+    renderPersonalSchedule();
+    renderTeamMonthlySchedule();
+    renderPersonalMonthlySchedule();
+    renderPeopleSummary();
+    updateScheduleStats();
+    renderPeopleManagement();
+    showNotification(`Đã xóa "${person.name}" và ${removedShifts} ca liên quan.`, 'success');
+}
+window.deletePerson = deletePerson;
+
+function deleteAllPeople() {
+    // Remove all people and their shifts silently
+    scheduleData.people = [];
+    scheduleData.shifts = [];
+    saveScheduleData();
+    updatePeopleSelects();
+    renderTeamSchedule();
+    renderPersonalSchedule();
+    renderTeamMonthlySchedule();
+    renderPersonalMonthlySchedule();
+    renderPeopleManagement();
+    renderPeopleSummary();
+    updateScheduleStats();
+}
+window.deleteAllPeople = deleteAllPeople;
 
 function renderPeopleSummary() {
     const peopleGrid = document.getElementById('peopleGrid');
@@ -1082,3 +1422,105 @@ function updateScheduleTab() {
     updateScheduleStats();
 }
 window.updateScheduleTab = updateScheduleTab;
+
+// ===== PASTE SCHEDULE (from Excel) =====
+function openPasteScheduleModal() {
+    const modal = document.getElementById('pasteScheduleModal');
+    if (modal) modal.classList.add('show');
+}
+window.openPasteScheduleModal = openPasteScheduleModal;
+
+function closePasteScheduleModal() {
+    const modal = document.getElementById('pasteScheduleModal');
+    if (modal) modal.classList.remove('show');
+}
+window.closePasteScheduleModal = closePasteScheduleModal;
+
+function ingestPastedSchedule() {
+    const ta = document.getElementById('pasteScheduleTextarea');
+    if (!ta) return;
+    const raw = ta.value || '';
+    try {
+        const grid = parsePastedTable(raw);
+        const result = importGridMatrix(grid);
+        saveScheduleData();
+        renderTeamSchedule();
+        renderPersonalSchedule();
+        renderTeamMonthlySchedule();
+        renderPersonalMonthlySchedule();
+        renderPeopleSummary();
+        updateScheduleStats();
+        closePasteScheduleModal();
+        showNotification(`Đã nhập ${result.shiftsAdded} ca, ${result.peopleAdded} người từ bảng dán!`, 'success');
+    } catch (e) {
+        console.error(e);
+        showNotification('Không thể đọc bảng dán. Vui lòng kiểm tra định dạng.', 'error');
+    }
+}
+window.ingestPastedSchedule = ingestPastedSchedule;
+
+function parsePastedTable(text) {
+    // Normalize NBSP and unicode
+    text = String(text).replace(/\u00A0/g, ' ');
+    if (text.includes('<table')) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = text;
+        const rows = Array.from(tmp.querySelectorAll('tr'));
+        return rows.map(tr => Array.from(tr.children).map(td => td.textContent.trim()));
+    }
+    return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        .split('\n')
+        .map(line => line.split('\t').map(c => c.trim()))
+        .filter(r => r.some(c => c.length > 0));
+}
+
+function importGridMatrix(rows) {
+    let headerRowIndex = -1;
+    for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const nums = rows[i].filter(c => /^\d{1,2}$/.test(c)).length;
+        if (nums >= 7) { headerRowIndex = i; break; }
+    }
+    if (headerRowIndex === -1) throw new Error('Không tìm thấy hàng ngày 1..31');
+    const header = rows[headerRowIndex];
+    const dayCols = [];
+    for (let c = 0; c < header.length; c++) {
+        const cell = header[c].trim();
+        if (/^\d{1,2}$/.test(cell)) dayCols.push({ col: c, day: parseInt(cell, 10) });
+    }
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1;
+    let peopleAdded = 0, shiftsAdded = 0;
+    const ensurePerson = (name) => {
+        let p = scheduleData.people.find(x => x.name.toLowerCase() === name.toLowerCase());
+        if (!p) { p = { id: 'person_' + Math.random().toString(36).slice(2,8), name, color: randomColor() }; scheduleData.people.push(p); peopleAdded++; }
+        return p;
+    };
+    for (let r = headerRowIndex + 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length === 0) continue;
+        const name = (row[0] || '').trim();
+        if (!name || name.toLowerCase().includes('tổng')) continue;
+        const person = ensurePerson(name);
+        for (const { col, day } of dayCols) {
+            const token = (row[col] || '').trim();
+            if (!token) continue;
+            const shiftType = normalizeShift(token);
+            if (!shiftType) continue;
+            const dateObj = new Date(year, month - 1, day);
+            const weekdayIndex = dateObj.getDay();
+            const dayKey = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][weekdayIndex];
+            // During import, allow overwrite: if a shift for same person/day already exists, replace it
+            const dupIndex = scheduleData.shifts.findIndex(s => s.personId === person.id && s.day === dayKey);
+            if (dupIndex >= 0) {
+                scheduleData.shifts[dupIndex].shiftType = shiftType;
+                scheduleData.shifts[dupIndex].createdAt = dateObj.toISOString();
+            } else {
+                scheduleData.shifts.push({ id: generateShiftId(), personId: person.id, day: dayKey, shiftType, note: null, mealAllowance: 'company', createdAt: dateObj.toISOString() });
+            }
+            shiftsAdded++;
+        }
+    }
+    updatePeopleSelects();
+    return { peopleAdded, shiftsAdded };
+}

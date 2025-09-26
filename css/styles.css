@@ -7470,6 +7470,12 @@ button.quick-btn.active:hover,
 .dark .option-tab.active { background: #2d3748; color: #60a5fa; border-bottom-color: #60a5fa; }
 .dark .single-option-content { background: #2d3748; }
 .dark .single-option-content h6 { background: linear-gradient(135deg, #374151 0%, #4a5568 100%); color: #e2e8f0; }
+/* People management dark mode fixes */
+.people-management .person-edit-item { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.people-management .person-color-picker { width: 28px; height: 20px; padding: 0; border: 1px solid #d1d5db; background: transparent; }
+.people-management .person-name-input { flex: 1; height: 30px; border-radius: 6px; border: 1px solid #d1d5db; padding: 6px 10px; background: #ffffff; color: #111827; }
+.dark .people-management .person-name-input { background: #111827; color: #e5e7eb; border-color: #4b5563; }
+.dark .people-management .person-color-picker { border-color: #4b5563; background: #111827; }
 .note-form {
     background: var(--card-bg);
     border: 1px solid var(--border-color);

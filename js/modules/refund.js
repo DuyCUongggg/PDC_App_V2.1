@@ -325,7 +325,8 @@ function calculateRefund(product, startDate, endDate) {
     }
     
     const perDay = Math.round(product.price / totalDays);
-    const refund = Math.round(perDay * daysRemaining);
+    // Compute refund proportionally and round once at the end to avoid double rounding drift
+    const refund = Math.round((product.price * daysRemaining) / totalDays);
     const refundPercentage = Math.round((daysRemaining / totalDays) * 100);
     const usedPercentage = Math.round((daysUsed / totalDays) * 100);
     const planText = `${product.duration} ${product.durationUnit}`;
