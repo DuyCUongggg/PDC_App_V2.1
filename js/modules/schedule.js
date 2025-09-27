@@ -61,7 +61,7 @@ function loadScheduleData() {
             scheduleData.people = parsed.people || scheduleData.people;
         }
     } catch (e) {
-        console.log('No saved schedule data found');
+        if (window.__PDC_DEBUG__ && console.log.__original) console.log.__original('No saved schedule data found');
     }
 }
 

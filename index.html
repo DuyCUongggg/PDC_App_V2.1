@@ -242,7 +242,7 @@
                                     <label class="form-label">Danh mục</label>
                                     <select class="form-select" id="productCategory">
                                         <option value="">Chọn danh mục</option>
-                                        <option value="AI Services" selected>AI</option>
+                                        <option value="AI" selected>AI</option>
                                         <option value="Công cụ">Công cụ</option>
                                         <option value="Combo">Combo</option>
                                     </select>
@@ -280,7 +280,7 @@
                             <input type="text" class="search-input" placeholder="Tìm kiếm sản phẩm..." id="adminSearch" oninput="filterProducts()">
                             <select class="filter-select" id="categoryFilter" onchange="filterProducts()">
                                 <option value="">Tất cả danh mục</option>
-                                <option value="AI Services">AI</option>
+                                <option value="AI">AI</option>
                                 <option value="Công cụ">Công cụ</option>
                                 <option value="Combo">Combo</option>
                             </select>
@@ -781,16 +781,15 @@
                 <section id="notes" class="tab-content">
                     <div class="card notes-card">
                         <div class="card-header">
-                            <h3 class="card-title">
-                                <span class="title-icon">📋</span>
-                                Ghi chú khách hàng
-                            </h3>
-                            <p class="card-subtitle">Tạo và quản lý ghi chú cho từng khách hàng</p>
+                            <div class="notes-toggle">
+                                <button id="notesListBtn" class="btn btn-outline active" onclick="switchNotesView('list')">Danh sách</button>
+                                <button id="notesAddBtn" class="btn btn-outline" onclick="switchNotesView('add')">Thêm ghi chú</button>
+                            </div>
                         </div>
                         
                         <div class="card-content">
                             <!-- Note Form -->
-                            <div class="note-form">
+                            <div id="notesAddView" class="note-form" style="display:none;">
                                 <div class="form-grid">
                                     <div class="form-group">
                                         <label class="form-label">Link chat khách hàng</label>
@@ -826,7 +825,7 @@
                             </div>
 
                             <!-- Notes List -->
-                            <div class="notes-list">
+                            <div id="notesListView" class="notes-list" style="display:block;">
                                 <div class="notes-header">
                                     <h4>Danh sách ghi chú</h4>
                                     <div class="notes-stats">
@@ -1099,7 +1098,7 @@
                     <div class="form-group">
                         <label class="form-label">Danh mục</label>
                         <select id="editProductCategory" class="form-select">
-                            <option value="AI Services">AI Services</option>
+                            <option value="AI">AI</option>
                             <option value="Công cụ">Công cụ</option>
                             <option value="Combo">Combo</option>
                         </select>

@@ -6,7 +6,7 @@
     "appName": "AI Sales Assistant"
   },
   "categories": [
-    "AI Services",
+    "AI",
     "Công cụ",
     "Combo"
   ],
@@ -17,7 +17,7 @@
       "duration": 1,
       "durationUnit": "tháng",
       "price": 145000,
-      "category": "AI Services",
+      "category": "AI",
       "note": "Gói team cho ChatGPT"
     },
     {
@@ -26,7 +26,7 @@
       "duration": 1,
       "durationUnit": "tháng",
       "price": 347500,
-      "category": "AI Services",
+      "category": "AI",
       "note": "Gói cao cấp Claude"
     },
     {
@@ -35,7 +35,7 @@
       "duration": 1,
       "durationUnit": "tháng",
       "price": 200000,
-      "category": "AI Services",
+      "category": "AI",
       "note": "Gói Grok cao cấp"
     },
     {

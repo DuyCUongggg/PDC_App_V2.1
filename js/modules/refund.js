@@ -14,7 +14,7 @@ let selectedComboRefundProduct = null;
 
 // Initialize refund module
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Refund module initialized');
+    if (window.__PDC_DEBUG__ && console.log.__original) console.log.__original('Refund module initialized');
     
     // Initialize combo refund system
     if (typeof initComboRefundSystem === 'function') {
@@ -27,6 +27,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initial state update
     updateRefundTab();
 });
+
+// Short category label for compact UI
+function getRefundCategoryShortLabel(category) {
+    const c = String(category || '').trim();
+    if (c === 'AI' || c === 'AI Services') return 'AI';
+    if (c === 'Công cụ') return 'CC';
+    if (c === 'Combo') return 'CB';
+    return c || '';
+}
 
 function setupRefundEventListeners() {
     // Product search
@@ -78,7 +87,7 @@ function handleProductSearch(e) {
                 <div class="result-details">
                     <span class="result-price">${formatPrice(p.price)}đ</span>
                     <span class="result-duration">${p.duration} ${p.durationUnit}</span>
-                    <span class="result-category">${p.category}</span>
+                    <span class="result-category">${getRefundCategoryShortLabel(p.category)}</span>
                 </div>
             </div>
         </div>
@@ -578,7 +587,7 @@ function updateRefundTab() {
 
 // Initialize combo refund system
 function initComboRefundSystem() {
-    console.log('Combo refund system initialized');
+    if (window.__PDC_DEBUG__ && console.log.__original) console.log.__original('Combo refund system initialized');
     // This function is called from app.js
 }
 

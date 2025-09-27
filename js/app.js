@@ -1,6 +1,20 @@
 ﻿
 (function() {
     'use strict';
+    // ===== DEBUG CONTROL (silence console logs in production) =====
+    const __PDC_DEBUG__ = false; // set true to enable verbose logs
+    (function setupConsoleSilencer() {
+        try {
+            window.__PDC_DEBUG__ = __PDC_DEBUG__;
+            if (!__PDC_DEBUG__) {
+                ['log', 'debug', 'info'].forEach(k => {
+                    const original = console[k];
+                    console[k] = function noop() { /* silenced */ };
+                    console[k].__original = original;
+                });
+            }
+        } catch {}
+    })();
     
     // Global variables
     let selectedComboProducts = [];
@@ -43,7 +57,7 @@
     }
 
     // ===== CORE =====
-    window.appData = { metadata: { lastUpdated: new Date().toISOString() }, products: [], categories: ["AI Services", "Công cụ"] };
+    window.appData = { metadata: { lastUpdated: new Date().toISOString() }, products: [], categories: ["AI", "Công cụ"] };
 
     // helpers
     function formatPrice(n) { return new Intl.NumberFormat('en-US').format(Number(n) || 0); }
@@ -78,6 +92,14 @@
     function normalizeText(s) {
         return (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     }
+    function getCategoryShortLabel(category) {
+        const c = String(category || '').trim();
+        if (c === 'AI') return 'AI';
+        if (c === 'Công cụ') return 'CC';
+        if (c === 'Combo') return 'CB';
+        if (c === 'AI Services') return 'AI';
+        return c || '';
+    }
 
     function sanitizeProducts() {
         if (!Array.isArray(appData.products)) return;
@@ -85,7 +107,9 @@
             let duration = Number(p?.duration);
             if (!Number.isFinite(duration) || duration <= 0) duration = 1;
             let unit = p?.durationUnit === 'ngày' || p?.durationUnit === 'tháng' ? p.durationUnit : 'tháng';
-            return { ...p, duration, durationUnit: unit };
+            // Normalize legacy categories
+            let category = p?.category === 'AI Services' ? 'AI' : (p?.category || '');
+            return { ...p, duration, durationUnit: unit, category };
         });
     }
 
@@ -221,8 +245,10 @@
     // ===== GOOGLE SHEETS INTEGRATION =====
     // 🆕 URL APPS SCRIPT MỚI CỦA BẠN
     // 🔄 THAY BẰNG URL MỚI SAU KHI DEPLOY (nếu có)
-    const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwbUfSgP-972nL-HgLEmJBWHTAKzVGmZWIpt9Yo1gCj1-RphvNuoNPVNv_cKPPlhv1teQ/exec';
+    const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZ0Ag2Bqm4iPMWDsnUZbGthWhVh9K-PaXdGis0U6cz2lfI1bx2brOmTrabXxmJ5rawuA/exec';
     const GOOGLE_SHEET_TOKEN = 'PDC123456';
+    // Expose for other modules (notes)
+    try { window.GAS_URL = GOOGLE_APPS_SCRIPT_URL; window.GAS_TOKEN = GOOGLE_SHEET_TOKEN; } catch {}
 
     // Load data from Google Sheets via Apps Script API
     async function loadFromGoogleSheets() {
@@ -233,7 +259,7 @@
             const response = await fetch(`${GOOGLE_APPS_SCRIPT_URL}`);
             const result = await response.json();
             
-            console.log('Google Sheets response:', result);
+            if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Google Sheets response:', result);
             
             if (result.success && Array.isArray(result.data)) {
                 // Convert Google Sheets data to app format
@@ -259,7 +285,7 @@
                     if (!Number.isFinite(duration) || duration <= 0) duration = 1;
 
                     // 🆕 NEW SHEET V2 - Direct mapping from H & I columns
-                    const category = item.category || item.H || 'AI Services';
+                    const category = (item.category || item.H || 'AI') === 'AI Services' ? 'AI' : (item.category || item.H || 'AI');
                     const actualNote = item.note || '';
                     
                     const product = {
@@ -279,7 +305,7 @@
                             if (typeof comboData === 'string' && comboData.trim()) {
                                 // Split by comma and clean up IDs
                                 product.comboProducts = comboData.split(',').map(id => id.trim()).filter(id => id);
-                                console.log(`Loaded combo ${item.name} with products:`, product.comboProducts);
+                    if (__PDC_DEBUG__ && console.log.__original) console.log.__original(`Loaded combo ${item.name} with products:`, product.comboProducts);
                             } else if (Array.isArray(comboData)) {
                                 product.comboProducts = comboData;
                             }
@@ -297,10 +323,10 @@
                 appData.metadata.lastUpdated = new Date().toISOString();
                 
                 // Debug: Log loaded products
-                console.log('Loaded products from Google Sheets:', products);
+                if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Loaded products from Google Sheets:', products);
                 const combos = products.filter(p => p.category === 'Combo');
                 if (combos.length > 0) {
-                    console.log('Found combo products:', combos);
+                    if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Found combo products:', combos);
                 }
                 
                 renderProductList();
@@ -321,7 +347,7 @@
 
     // Save data to Google Sheets via Apps Script API
     async function saveToGoogleSheets() {
-        console.log('saveToGoogleSheets called!');
+        if (__PDC_DEBUG__ && console.log.__original) console.log.__original('saveToGoogleSheets called!');
         try {
             showNotification('Đang lưu dữ liệu vào Google Sheets...', 'info');
             
@@ -336,13 +362,13 @@
                     note: product.note || '', // Column F
                     updateAT: new Date().toISOString(), // Column G
                     // 🆕 NEW SHEET V2 - Direct mapping to H & I columns
-                    H: product.category || 'AI Services',      // Column H = category
+                    H: (product.category === 'AI Services' ? 'AI' : (product.category || 'AI')),      // Column H = category
                     I: product.category === 'Combo' && product.comboProducts ? 
                        product.comboProducts.join(',') : ''    // Column I = comboProducts
                 };
                 
                 if (product.category === 'Combo' && product.comboProducts && product.comboProducts.length > 0) {
-                    console.log(`Saving combo ${product.name} with comboProducts: ${sheetProduct.I}`);
+                    if (__PDC_DEBUG__ && console.log.__original) console.log.__original(`Saving combo ${product.name} with comboProducts: ${sheetProduct.I}`);
                 }
                 
                 return sheetProduct;
@@ -351,7 +377,7 @@
             // Also save combo data to local JSON as backup
             saveComboDataToLocal();
             
-            console.log('Sending to Google Sheets:', products);
+            if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Sending to Google Sheets:', products);
             
             // POST with text/plain to avoid preflight; token in query
             const url = `${GOOGLE_APPS_SCRIPT_URL}?token=${encodeURIComponent(GOOGLE_SHEET_TOKEN)}`;
@@ -367,7 +393,7 @@
             }
             
             const result = await response.json();
-            console.log('Google Sheets save response:', result);
+            if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Google Sheets save response:', result);
             
             if (result.success) {
                 appData.metadata.lastUpdated = new Date().toISOString();
@@ -429,7 +455,7 @@
     window.saveToGoogleSheets = saveToGoogleSheets;
 
     // Debug: Test if functions are loaded
-    console.log('Google Sheets functions loaded:', {
+    if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Google Sheets functions loaded:', {
         loadFromGoogleSheets: typeof loadFromGoogleSheets,
         saveToGoogleSheets: typeof saveToGoogleSheets
     });
@@ -483,7 +509,7 @@
                         </div>
                     </div>
                 </td>
-                <td><span class="product-category ${p.category === 'AI' || p.category === 'AI Services' ? 'category-ai' : p.category === 'Combo' ? 'category-combo' : p.category === 'Công cụ' ? 'category-tool' : ''}">${p.category === 'AI' || p.category === 'AI Services' ? 'AI' : p.category}</span></td>
+                <td><span class="product-category ${p.category === 'AI' ? 'category-ai' : p.category === 'Combo' ? 'category-combo' : p.category === 'Công cụ' ? 'category-tool' : ''}">${p.category}</span></td>
                 <td class="product-duration">${Math.max(1, p.duration)} ${p.durationUnit}</td>
                 <td class="product-price">${formatPrice(p.price)}đ</td>
                 <td>
@@ -552,7 +578,7 @@
             // Get product IDs from selected AI names
             const selectedAINames = Array.from(selectedAICheckboxes).map(cb => cb.value);
             const selectedAIProducts = appData.products.filter(p => 
-                (p.category === 'AI' || p.category === 'AI Services') && 
+                (p.category === 'AI') && 
                 selectedAINames.includes(p.name)
             );
             
@@ -562,11 +588,13 @@
             }
             
             product.comboProducts = selectedAIProducts.map(p => p.id);
-            console.log('Combo product created with comboProducts:', product.comboProducts);
+            if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Combo product created with comboProducts:', product.comboProducts);
         }
         
         appData.products.push(product);
         appData.metadata.lastUpdated = new Date().toISOString();
+        // Immediate sync for other tabs (refund/upgrade/templates)
+        try { window.products = appData.products.slice(); } catch {}
         ['productName', 'productDuration', 'productPrice'].forEach(id => document.getElementById(id).value = '');
         
         // Clear combo selection
@@ -574,10 +602,11 @@
             // Clear AI checkboxes
             const aiCheckboxes = document.querySelectorAll('#aiSelectionGrid input[type="checkbox"]');
             aiCheckboxes.forEach(cb => cb.checked = false);
-            document.getElementById('productCategory').value = 'AI Services';
+            document.getElementById('productCategory').value = 'AI';
         }
         
-        renderProductList(); updateHeaderStats(); updateTabs(); if (typeof refreshRefundState === 'function') refreshRefundState(); showNotification('Đã thêm!');
+        // Refresh all dependent UIs immediately
+        renderProductList(); updateHeaderStats(); if (typeof updateTabs === 'function') updateTabs(); if (typeof refreshRefundState === 'function') refreshRefundState(); showNotification('Đã thêm!');
         
         // Force load logo for the new product
         setTimeout(() => {
@@ -586,6 +615,7 @@
             }
         }, 100);
         
+        // Debounced remote save (does not block UI)
         queueAutoSave();
     }
     
@@ -840,7 +870,7 @@
 
             const selectedAIIds = Array.from(selectedAICheckboxes).map(cb => cb.value);
             const selectedAIProducts = appData.products.filter(p =>
-                (p.category === 'AI' || p.category === 'AI Services') &&
+                (p.category === 'AI') &&
                 selectedAIIds.includes(p.id)
             );
 
@@ -856,7 +886,9 @@
         }
         
         appData.metadata.lastUpdated = new Date().toISOString();
-        closeEditModal(); renderProductList(); updateHeaderStats(); if (typeof refreshRefundState === 'function') refreshRefundState(); showNotification('Đã lưu!');
+        // Immediate sync for cross-tab searches
+        try { window.products = appData.products.slice(); } catch {}
+        closeEditModal(); renderProductList(); updateHeaderStats(); if (typeof refreshRefundState === 'function') refreshRefundState(); if (typeof updateTabs === 'function') updateTabs(); showNotification('Đã lưu!');
         queueAutoSave();
     }
     function askDeleteProduct(id) { _del = id; document.getElementById('confirmDialog').classList.add('show'); }
@@ -865,6 +897,7 @@
             const idToDelete = _del;
             appData.products = appData.products.filter(p => p.id !== idToDelete);
             _del = null;
+            try { window.products = appData.products.slice(); } catch {}
             renderProductList();
             updateHeaderStats();
             if (typeof refreshRefundState === 'function') refreshRefundState();
@@ -904,7 +937,7 @@
                         <div class="result-details">
                             <span class="result-price">${formatPrice(p.price)}đ</span>
                             <span class="result-duration">${Math.max(1, p.duration)} ${p.durationUnit}</span>
-                            <span class="result-category">${p.category || ''}</span>
+                            <span class="result-category">${getCategoryShortLabel(p.category)}</span>
                         </div>
                     </div>
                 </div>
@@ -940,7 +973,7 @@
                         <div class="result-details">
                             <span class="result-price">${formatPrice(p.price)}đ</span>
                             <span class="result-duration">${Math.max(1, p.duration)} ${p.durationUnit}</span>
-                            <span class="result-category">${p.category || ''}</span>
+                            <span class="result-category">${getCategoryShortLabel(p.category)}</span>
                         </div>
                     </div>
                 </div>
@@ -996,7 +1029,7 @@
                 if (parsed.metadata) appData.metadata = parsed.metadata;
             }
         } catch (e) {
-            console.log('No saved data found or error loading:', e);
+            if (__PDC_DEBUG__ && console.log.__original) console.log.__original('No saved data found or error loading:', e);
         }
         
         bindPriceInput(document.getElementById('productPrice'));
@@ -1230,20 +1263,20 @@
     // ===== COMBO REFUND FUNCTIONS =====
     function initComboRefund() {
         // Will be initialized when a combo product is selected
-        console.log('Combo refund system initialized');
+        if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Combo refund system initialized');
     }
     
     function showComboRefundOptions(comboProduct) {
-        console.log('showComboRefundOptions called with:', comboProduct);
+        if (__PDC_DEBUG__ && console.log.__original) console.log.__original('showComboRefundOptions called with:', comboProduct);
         selectedComboRefundProduct = comboProduct;
         const comboSection = document.getElementById('comboRefundSection');
         const comboList = document.getElementById('comboProductsList');
         
-        console.log('DOM elements:', { comboSection: !!comboSection, comboList: !!comboList });
-        console.log('Combo products:', comboProduct.comboProducts);
+        if (__PDC_DEBUG__ && console.log.__original) console.log.__original('DOM elements:', { comboSection: !!comboSection, comboList: !!comboList });
+        if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Combo products:', comboProduct.comboProducts);
         
         if (!comboSection || !comboList || !comboProduct.comboProducts) {
-            console.log('Missing elements or combo products');
+            if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Missing elements or combo products');
             return;
         }
         
@@ -1394,7 +1427,7 @@
 
         if (products && products.length > 0) {
             const aiProducts = products.filter(product =>
-                product.category === 'AI' || product.category === 'AI Services'
+                product.category === 'AI'
             );
 
             if (aiProducts.length > 0) {
@@ -1457,7 +1490,7 @@
                 lastUpdated: new Date().toISOString()
             };
             localStorage.setItem('pdc_combo_data', JSON.stringify(comboData));
-            console.log('Combo data saved to localStorage as backup');
+            if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Combo data saved to localStorage as backup');
         } catch (e) {
             console.warn('Failed to save combo data to localStorage:', e);
         }
@@ -1468,7 +1501,7 @@
             const saved = localStorage.getItem('pdc_combo_data');
             if (saved) {
                 const comboData = JSON.parse(saved);
-                console.log('Loaded combo data from localStorage:', comboData);
+                if (__PDC_DEBUG__ && console.log.__original) console.log.__original('Loaded combo data from localStorage:', comboData);
                 return comboData.combos || [];
             }
         } catch (e) {

@@ -5,7 +5,7 @@ let selectedQuoteProducts = []; // Array để lưu nhiều sản phẩm
 
 // Update quote tab state based on available products
 function updateQuoteTab() {
-    console.log('updateQuoteTab called, products:', appData.products?.length || 0);
+    if (window.__PDC_DEBUG__ && console.log.__original) console.log.__original('updateQuoteTab called, products:', appData.products?.length || 0);
     
     const emptyState = document.getElementById('quoteEmptyState');
     const quoteForm = document.querySelector('.quote-form');
@@ -20,11 +20,11 @@ function updateQuoteTab() {
     if (hasProducts) {
         emptyState.style.display = 'none';
         quoteForm.style.display = 'block';
-        console.log('Quote form shown');
+        if (window.__PDC_DEBUG__ && console.log.__original) console.log.__original('Quote form shown');
     } else {
         emptyState.style.display = 'block';
         quoteForm.style.display = 'none';
-        console.log('Quote empty state shown');
+        if (window.__PDC_DEBUG__ && console.log.__original) console.log.__original('Quote empty state shown');
     }
     
     // Reset form state

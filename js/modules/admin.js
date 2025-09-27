@@ -45,7 +45,7 @@ function deleteSelectedProducts() {
 
 function changePage(pageNumber) {
     // Implement pagination logic here
-    console.log('Changing to page:', pageNumber);
+    if (window.__PDC_DEBUG__ && console.log.__original) console.log.__original('Changing to page:', pageNumber);
     // This would need to be implemented based on your pagination needs
 }
 
@@ -63,7 +63,7 @@ function populateAISelection() {
     if (products && products.length > 0) {
         // Filter only AI products
         const aiProducts = products.filter(product => 
-            product.category === 'AI' || product.category === 'AI Services'
+            product.category === 'AI'
         );
         
         if (aiProducts.length > 0) {
